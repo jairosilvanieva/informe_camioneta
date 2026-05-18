@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lavadero Canino - Registro Diario</title>
+
+<style>
+    body{ font-family: Arial, sans-serif; margin:20px; background:#f2f2f2; }
+    h1{ text-align:center; margin-bottom:10px; }
+    .barra-top{ text-align:center; margin-bottom:20px; }
+    .barra-top a{
+        display:inline-block; background:#2a7ae2; color:white;
+        padding:10px 20px; border-radius:6px; text-decoration:none;
+        font-weight:bold;
+    }
+    .estado{
+        text-align:center; padding:8px; margin-bottom:15px;
+        border-radius:6px; font-size:13px;
+    }
+    .estado.ok{ background:#d4edda; color:#155724; }
+    .estado.error{ background:#f8d7da; color:#721c24; }
+    .estado.cargando{ background:#fff3cd; color:#856404; }
+
+    .nav-mes{
+        display:flex; justify-content:center; align-items:center;
+        gap:15px; margin-bottom:15px;
+    }
+    .nav-mes button{
+        background:#333; color:white; border:none;
+        padding:8px 16px; border-radius:6px; cursor:pointer;
+        font-size:16px; font-weight:bold;
+    }
+    .nav-mes button:hover{ background:#555; }
+    .nav-mes h2{
+        margin:0; min-width:280px; text-align:center;
+        background:#333; color:white;
+        padding:10px; border-radius:8px;
+    }
+    .nav-mes select{
+        padding:8px; font-size:14px; border-radius:6px;
+        border:1px solid #999;
+    }
+
+    table{
+        width:100%; border-collapse:collapse;
+        table-layout:fixed; background:white;
+    }
+    th{
+        background:#555; color:white; padding:10px; border:1px solid #ccc;
+    }
+    td{
+        border:1px solid #999; vertical-align:top;
+        height:280px; padding:4px;
+    }
+    .dia{ font-weight:bold; font-size:16px; margin-bottom:5px; }
+    .local{
+        border:1px solid #ccc; border-radius:5px;
+        padding:4px; margin-bottom:5px; background:#fafafa;
+    }
+    .local h4{
+        margin:0 0 5px 0; font-size:12px;
+        background:#eaeaea; padding:3px; border-radius:3px;
+    }
+    label{
+        font-size:11px; font-weight:bold;
+        display:block; margin-top:4px;
+    }
+    input{
+        width:100%; padding:4px; margin-top:2px;
+        box-sizing:border-box; font-size:12px;
+    }
+    input.guardado{ background:#e8f5e9; }
+    .vacio{ background:#ececec; }
+</style>
+</head>
+
+<body>
+
+<h1>Lavadero Canino - Registro Diario</h1>
+
+<div class="barra-top">
+    <a href="informe.html">Ver Informe / Comparativa</a>
+</div>
+
+<div id="estado" class="estado cargando">Conectando con la base de datos...</div>
+
+<div class="nav-mes">
+    <button onclick="cambiarMes(-1)">← Anterior</button>
+    <h2 id="tituloMes"></h2>
+    <button onclick="cambiarMes(1)">Siguiente →</button>
+    <select id="selectorAnio" onchange="irAAnio(this.value)"></select>
+</div>
+
+<table id="tablaMes">
+    <tr>
+        <th>Lunes</th><th>Martes</th><th>Miércoles</th>
+        <th>Jueves</th><th>Viernes</th><th>Sábado</th><th>Domingo</th>
+    </tr>
+</table>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="supabase.js"></script>
+
+<script>
+const LOCALES = ["Sarmiento", "Guemes", "Constitucion"];
+const NOMBRES_MES = [
+    "Enero","Febrero","Marzo","Abril","Mayo","Junio",
+    "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"
+];
+
+// Mes/año actual (arranca en el de hoy)
+const hoy = new Date();
+let anioActual = hoy.getFullYear();
+let mesActual = hoy.getMonth() + 1; // 1..12
+
+const estado = document.getElementById("estado");
+function setEstado(texto, clase){
+    estado.textContent = texto;
+    estado.className = "estado " + clase;
+}
+
+function fechaISO(anio, mes, dia){
+    const m = String(mes).padStart(2,"0");
+    const d = String(dia).padStart(2,"0");
+    return `${anio}-${m}-${d}`;
+}
+
+// Día de semana del 1ro (lunes=0 ... domingo=6)
+function primerDiaSemana(anio, mes){
+    const d = new Date(anio, mes-1, 1).getDay(); // domingo=0 ... sábado=6
+    return (d + 6) % 7; // convertimos a lunes=0
+}
+
+function cantidadDias(anio, mes){
+    return new Date(anio, mes, 0).getDate();
+}
+
+function crearBloqueLocal(fecha, nombreLocal){
+    return `
+        <div class="local">
+            <h4>${nombreLocal}</h4>
+            <label>Camioneta</label>
+            <input type="number" min="0"
+                data-fecha="${fecha}" data-local="${nombreLocal}" data-campo="camioneta"
+                placeholder="0">
+            <label>Total</label>
+            <input type="number" min="0"
+                data-fecha="${fecha}" data-local="${nombreLocal}" data-campo="total"
+                placeholder="0">
+        </div>
+    `;
+}
+
+function renderMes(){
+    const tabla = document.getElementById("tablaMes");
+    // Limpiar todo menos la primera fila (encabezados)
+    while(tabla.rows.length > 1) tabla.deleteRow(1);
+
+    document.getElementById("tituloMes").textContent =
+        `${NOMBRES_MES[mesActual-1]} ${anioActual}`;
+
+    const pri = primerDiaSemana(anioActual, mesActual);
+    const dias = cantidadDias(anioActual, mesActual);
+
+    let dia = 1;
+    let tr = document.createElement('tr');
+
+    for(let i=0; i<pri; i++){
+        let td = document.createElement('td');
+        td.className = "vacio";
+        tr.appendChild(td);
+    }
+
+    while(dia <= dias){
+        if(tr.children.length === 7){
+            tabla.appendChild(tr);
+            tr = document.createElement('tr');
+        }
+        let td = document.createElement('td');
+        const fecha = fechaISO(anioActual, mesActual, dia);
+        td.innerHTML = `
+            <div class="dia">${dia}</div>
+            ${LOCALES.map(l => crearBloqueLocal(fecha, l)).join("")}
+        `;
+        tr.appendChild(td);
+        dia++;
+    }
+    while(tr.children.length < 7){
+        let td = document.createElement('td');
+        td.className = "vacio";
+        tr.appendChild(td);
+    }
+    tabla.appendChild(tr);
+
+    // Conectar inputs al guardado
+    document.querySelectorAll("input[data-fecha]").forEach(inp => {
+        inp.addEventListener("change", () => guardarCelda(inp));
+    });
+
+    cargarDatosDelMes();
+}
+
+function cambiarMes(delta){
+    mesActual += delta;
+    if(mesActual > 12){ mesActual = 1; anioActual++; }
+    if(mesActual < 1){ mesActual = 12; anioActual--; }
+    actualizarSelectorAnio();
+    renderMes();
+}
+
+function irAAnio(a){
+    anioActual = Number(a);
+    renderMes();
+}
+
+function actualizarSelectorAnio(){
+    const sel = document.getElementById("selectorAnio");
+    sel.innerHTML = "";
+    // Mostramos desde 2025 hasta el año actual + 2
+    const desde = 2025;
+    const hasta = hoy.getFullYear() + 2;
+    for(let a=desde; a<=hasta; a++){
+        const op = document.createElement("option");
+        op.value = a; op.textContent = a;
+        if(a === anioActual) op.selected = true;
+        sel.appendChild(op);
+    }
+}
+
+async function cargarDatosDelMes(){
+    try{
+        const desde = fechaISO(anioActual, mesActual, 1);
+        const hasta = fechaISO(anioActual, mesActual, cantidadDias(anioActual, mesActual));
+
+        const { data, error } = await db
+            .from("registros")
+            .select("*")
+            .gte("fecha", desde)
+            .lte("fecha", hasta);
+        if(error) throw error;
+
+        data.forEach(r => {
+            const sel = `input[data-fecha="${r.fecha}"][data-local="${r.local}"]`;
+            const inpCam = document.querySelector(sel + `[data-campo="camioneta"]`);
+            const inpTot = document.querySelector(sel + `[data-campo="total"]`);
+            if(inpCam){ inpCam.value = r.camioneta ?? ""; inpCam.classList.add("guardado"); }
+            if(inpTot){ inpTot.value = r.total ?? "";   inpTot.classList.add("guardado"); }
+        });
+        setEstado("Conectado. Los cambios se guardan automáticamente.", "ok");
+    }catch(e){
+        console.error(e);
+        setEstado("Error al conectar: " + e.message, "error");
+    }
+}
+
+async function guardarCelda(input){
+    const fecha = input.dataset.fecha;
+    const local = input.dataset.local;
+
+    const inpCam = document.querySelector(`input[data-fecha="${fecha}"][data-local="${local}"][data-campo="camioneta"]`);
+    const inpTot = document.querySelector(`input[data-fecha="${fecha}"][data-local="${local}"][data-campo="total"]`);
+
+    const camioneta = inpCam.value === "" ? null : Number(inpCam.value);
+    const total     = inpTot.value === "" ? null : Number(inpTot.value);
+
+    setEstado("Guardando...", "cargando");
+
+    const { error } = await db
+        .from("registros")
+        .upsert({ fecha, local, camioneta, total }, { onConflict: "fecha,local" });
+
+    if(error){
+        setEstado("Error al guardar: " + error.message, "error");
+    }else{
+        inpCam.classList.add("guardado");
+        inpTot.classList.add("guardado");
+        setEstado("Guardado ✓", "ok");
+    }
+}
+
+actualizarSelectorAnio();
+renderMes();
+
+// Refresco automático cada 30 seg para ver cambios de otros usuarios
+setInterval(cargarDatosDelMes, 30000);
+</script>
+
+</body>
+</html>

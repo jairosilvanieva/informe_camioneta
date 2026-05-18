@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Informe - Lavadero Canino</title>
+
+<style>
+    body{ font-family: Arial, sans-serif; margin:20px; background:#f2f2f2; }
+    h1{ text-align:center; }
+    .barra-top{ text-align:center; margin-bottom:20px; }
+    .barra-top a{
+        display:inline-block; background:#2a7ae2; color:white;
+        padding:10px 20px; border-radius:6px; text-decoration:none;
+        font-weight:bold;
+    }
+    .filtros{
+        background:white; padding:15px; border-radius:8px;
+        margin-bottom:20px; text-align:center;
+    }
+    .filtros label{ font-weight:bold; margin:0 8px; }
+    .filtros input, .filtros button{
+        padding:6px; font-size:14px; margin:0 4px;
+    }
+    .filtros button{
+        background:#2a7ae2; color:white; border:none;
+        border-radius:4px; cursor:pointer; padding:6px 16px;
+    }
+    .tarjetas{
+        display:grid; grid-template-columns:repeat(3,1fr);
+        gap:15px; margin-bottom:20px;
+    }
+    .card{
+        background:white; padding:15px; border-radius:8px;
+        text-align:center; box-shadow:0 1px 3px rgba(0,0,0,0.1);
+    }
+    .card h3{ margin:0 0 10px 0; color:#333; }
+    .card .num{ font-size:32px; font-weight:bold; color:#2a7ae2; }
+    .card .sub{ font-size:13px; color:#666; margin-top:5px; }
+
+    .grafico-box{
+        background:white; padding:20px; border-radius:8px;
+        margin-bottom:20px;
+    }
+    .grafico-box h3{ margin-top:0; }
+
+    table.resumen{
+        width:100%; border-collapse:collapse; background:white;
+        border-radius:8px; overflow:hidden;
+    }
+    table.resumen th, table.resumen td{
+        padding:10px; border-bottom:1px solid #eee; text-align:center;
+    }
+    table.resumen th{ background:#333; color:white; }
+
+    .exportar{ text-align:center; margin-top:20px; }
+    .exportar button{
+        background:#28a745; color:white; border:none;
+        padding:10px 20px; border-radius:6px; cursor:pointer;
+        font-size:14px;
+    }
+</style>
+</head>
+
+<body>
+
+<h1>Informe Comparativo de Locales</h1>
+
+<div class="barra-top">
+    <a href="index.html">← Volver al calendario</a>
+</div>
+
+<div class="filtros">
+    <label>Desde:</label>
+    <input type="date" id="desde">
+    <label>Hasta:</label>
+    <input type="date" id="hasta">
+    <button onclick="generar()">Generar informe</button>
+</div>
+
+<div class="tarjetas" id="tarjetas"></div>
+
+<div class="grafico-box">
+    <h3>Comparativa: % uso camioneta por local</h3>
+    <canvas id="graficoPorcentaje" height="100"></canvas>
+</div>
+
+<div class="grafico-box">
+    <h3>Cantidad de turnos: camioneta vs. particular</h3>
+    <canvas id="graficoCantidad" height="100"></canvas>
+</div>
+
+<div class="grafico-box">
+    <h3>Detalle por local</h3>
+    <table class="resumen" id="tablaResumen">
+        <thead>
+            <tr>
+                <th>Local</th>
+                <th>Total turnos</th>
+                <th>Con camioneta</th>
+                <th>Particular</th>
+                <th>% Camioneta</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+</div>
+
+<div class="exportar">
+    <button onclick="exportarCSV()">Descargar Excel (CSV)</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="supabase.js"></script>
+
+<script>
+const LOCALES = ["Sarmiento", "Guemes", "Constitucion"];
+const COLORES = ["#2a7ae2", "#e2932a", "#9c27b0"];
+
+// Fechas por defecto: mes actual
+const hoy = new Date();
+const primero = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+document.getElementById("desde").value = primero.toISOString().slice(0,10);
+document.getElementById("hasta").value = hoy.toISOString().slice(0,10);
+
+let chartPorc = null;
+let chartCant = null;
+let datosActuales = [];
+
+async function generar(){
+    const desde = document.getElementById("desde").value;
+    const hasta = document.getElementById("hasta").value;
+
+    const { data, error } = await db
+        .from("registros")
+        .select("*")
+        .gte("fecha", desde)
+        .lte("fecha", hasta);
+
+    if(error){ alert("Error: " + error.message); return; }
+    datosActuales = data;
+
+    const resumen = LOCALES.map(local => {
+        const filas = data.filter(r => r.local === local);
+        const total     = filas.reduce((s,r) => s + (r.total     || 0), 0);
+        const camioneta = filas.reduce((s,r) => s + (r.camioneta || 0), 0);
+        const particular = total - camioneta;
+        const pct = total > 0 ? (camioneta / total * 100) : 0;
+        return { local, total, camioneta, particular, pct };
+    });
+
+    // Tarjetas
+    document.getElementById("tarjetas").innerHTML = resumen.map((r,i) => `
+        <div class="card">
+            <h3>${r.local}</h3>
+            <div class="num">${r.pct.toFixed(1)}%</div>
+            <div class="sub">usan camioneta</div>
+            <div class="sub">${r.camioneta} de ${r.total} turnos</div>
+        </div>
+    `).join("");
+
+    // Tabla
+    document.querySelector("#tablaResumen tbody").innerHTML = resumen.map(r => `
+        <tr>
+            <td><b>${r.local}</b></td>
+            <td>${r.total}</td>
+            <td>${r.camioneta}</td>
+            <td>${r.particular}</td>
+            <td>${r.pct.toFixed(1)}%</td>
+        </tr>
+    `).join("");
+
+    // Gráfico %
+    if(chartPorc) chartPorc.destroy();
+    chartPorc = new Chart(document.getElementById("graficoPorcentaje"), {
+        type: "bar",
+        data: {
+            labels: resumen.map(r => r.local),
+            datasets: [{
+                label: "% Camioneta",
+                data: resumen.map(r => r.pct.toFixed(1)),
+                backgroundColor: COLORES
+            }]
+        },
+        options: { scales: { y: { beginAtZero:true, max:100 } } }
+    });
+
+    // Gráfico cantidad
+    if(chartCant) chartCant.destroy();
+    chartCant = new Chart(document.getElementById("graficoCantidad"), {
+        type: "bar",
+        data: {
+            labels: resumen.map(r => r.local),
+            datasets: [
+                { label:"Camioneta",  data: resumen.map(r => r.camioneta),  backgroundColor:"#2a7ae2" },
+                { label:"Particular", data: resumen.map(r => r.particular), backgroundColor:"#bbb" }
+            ]
+        },
+        options: { scales: { x:{ stacked:true }, y:{ stacked:true, beginAtZero:true } } }
+    });
+}
+
+function exportarCSV(){
+    if(!datosActuales.length){ alert("Primero generá el informe"); return; }
+    const filas = [["Fecha","Local","Camioneta","Total","Particular"]];
+    datosActuales.forEach(r => {
+        filas.push([r.fecha, r.local, r.camioneta||0, r.total||0, (r.total||0)-(r.camioneta||0)]);
+    });
+    const csv = filas.map(f => f.join(",")).join("\n");
+    const blob = new Blob([csv], { type:"text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "informe-lavadero.csv";
+    a.click();
+}
+
+generar();
+</script>
+
+</body>
+</html>
