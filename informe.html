@@ -42,7 +42,15 @@
         background:white; padding:20px; border-radius:8px;
         margin-bottom:20px;
     }
-    .grafico-box h3{ margin-top:0; }
+    .grafico-box h3{ margin-top:0; font-size:15px; }
+    .graficos-row{
+        display:grid; grid-template-columns:1fr 1fr;
+        gap:15px; margin-bottom:20px;
+    }
+    .graficos-row .grafico-box{ margin-bottom:0; }
+    @media (max-width: 800px){
+        .graficos-row{ grid-template-columns:1fr; }
+    }
 
     table.resumen{
         width:100%; border-collapse:collapse; background:white;
@@ -80,14 +88,15 @@
 
 <div class="tarjetas" id="tarjetas"></div>
 
-<div class="grafico-box">
-    <h3>Comparativa: % uso camioneta por local</h3>
-    <canvas id="graficoPorcentaje" height="100"></canvas>
-</div>
-
-<div class="grafico-box">
-    <h3>Cantidad de turnos: camioneta vs. particular</h3>
-    <canvas id="graficoCantidad" height="100"></canvas>
+<div class="graficos-row">
+    <div class="grafico-box">
+        <h3>Comparativa: % uso camioneta por local</h3>
+        <canvas id="graficoPorcentaje" height="180"></canvas>
+    </div>
+    <div class="grafico-box">
+        <h3>Cantidad de turnos: camioneta vs. particular</h3>
+        <canvas id="graficoCantidad" height="180"></canvas>
+    </div>
 </div>
 
 <div class="grafico-box">
