@@ -401,6 +401,7 @@ async function mostrarDebug(){
     const box = document.getElementById("debugBox");
     box.style.display = "block";
     box.textContent = "Descargando...";
+    box.scrollIntoView({ behavior:"smooth", block:"start" });
     let out = "";
     for(const z of ZONAS){
         const url = `https://docs.google.com/spreadsheets/d/${z.sheetId}/export?format=csv&gid=${z.gid}`;
