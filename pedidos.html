@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Informe de Pedidos por Zona</title>
+
+<style>
+    body{ font-family: Arial, sans-serif; margin:20px; background:#f2f2f2; }
+    h1{ text-align:center; }
+    .barra-top{ text-align:center; margin-bottom:20px; }
+    .barra-top a{
+        display:inline-block; background:#2a7ae2; color:white;
+        padding:10px 20px; border-radius:6px; text-decoration:none;
+        font-weight:bold; margin:0 4px;
+    }
+    .filtros{
+        background:white; padding:15px; border-radius:8px;
+        margin-bottom:20px; text-align:center;
+    }
+    .filtros label{ font-weight:bold; margin:0 8px; }
+    .filtros input, .filtros button, .filtros select{
+        padding:6px; font-size:14px; margin:4px;
+    }
+    .filtros button{
+        background:#2a7ae2; color:white; border:none;
+        border-radius:4px; cursor:pointer; padding:6px 16px;
+    }
+    .estado{
+        text-align:center; padding:8px; margin-bottom:15px;
+        border-radius:6px; font-size:13px;
+    }
+    .estado.ok{ background:#d4edda; color:#155724; }
+    .estado.error{ background:#f8d7da; color:#721c24; }
+    .estado.cargando{ background:#fff3cd; color:#856404; }
+
+    .tarjetas{
+        display:grid; grid-template-columns:repeat(2,1fr);
+        gap:15px; margin-bottom:20px;
+    }
+    .card{
+        background:white; padding:15px; border-radius:8px;
+        text-align:center; box-shadow:0 1px 3px rgba(0,0,0,0.1);
+    }
+    .card h3{ margin:0 0 10px 0; color:#333; }
+    .card .num{ font-size:32px; font-weight:bold; color:#2a7ae2; }
+    .card .sub{ font-size:13px; color:#666; margin-top:5px; }
+
+    .grafico-box{
+        background:white; padding:20px; border-radius:8px;
+        margin-bottom:20px;
+    }
+    .grafico-box h3{ margin-top:0; font-size:15px; }
+
+    table.resumen{
+        width:100%; border-collapse:collapse; background:white;
+        border-radius:8px; overflow:hidden;
+    }
+    table.resumen th, table.resumen td{
+        padding:10px; border-bottom:1px solid #eee; text-align:center;
+    }
+    table.resumen th{ background:#333; color:white; }
+
+    .exportar{ text-align:center; margin-top:20px; }
+    .exportar button{
+        background:#28a745; color:white; border:none;
+        padding:10px 20px; border-radius:6px; cursor:pointer;
+        font-size:14px;
+    }
+
+    @media (max-width:800px){
+        .tarjetas{ grid-template-columns:1fr; }
+    }
+</style>
+</head>
+<body>
+
+<h1>Informe de Pedidos por Zona</h1>
+
+<div class="barra-top">
+    <a href="index.html">← Calendario perros</a>
+    <a href="informe.html">Informe camioneta perros</a>
+</div>
+
+<div class="filtros">
+    <label>Período:</label>
+    <select id="periodo" onchange="onPeriodoChange()">
+        <option value="semana">Esta semana</option>
+        <option value="mes" selected>Este mes</option>
+        <option value="mes_anterior">Mes anterior</option>
+        <option value="rango">Rango personalizado</option>
+    </select>
+    <span id="rangoCustom" style="display:none">
+        <label>Desde:</label>
+        <input type="date" id="desde">
+        <label>Hasta:</label>
+        <input type="date" id="hasta">
+    </span>
+    <label>Agrupar:</label>
+    <select id="agrupar">
+        <option value="dia">Por día</option>
+        <option value="semana">Por semana</option>
+    </select>
+    <button onclick="generar()">Generar</button>
+</div>
+
+<div id="estado" class="estado cargando">Cargando datos de Google Sheets...</div>
+
+<div class="tarjetas" id="tarjetas"></div>
+
+<div class="grafico-box">
+    <h3>Comparativa de pedidos: Güemes vs. Constitución</h3>
+    <canvas id="graficoComp" height="120"></canvas>
+</div>
+
+<div class="grafico-box">
+    <h3>Detalle por zona</h3>
+    <table class="resumen" id="tablaResumen">
+        <thead>
+            <tr>
+                <th>Zona</th>
+                <th>Pedidos finalizados</th>
+                <th>Promedio diario</th>
+                <th>Mejor día</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+</div>
+
+<div class="exportar">
+    <button onclick="exportarCSV()">Descargar CSV</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+// ============================================================
+// CONFIG DE PLANILLAS
+// ============================================================
+const ZONAS = [
+    {
+        nombre: "Güemes",
+        color: "#2a7ae2",
+        sheetId: "1qItCI43HiV90MDMJ6m5gFlnQPwL31Rw21s85jgq6e94",
+        gid: "1900740234"
+    },
+    {
+        nombre: "Constitución",
+        color: "#9c27b0",
+        sheetId: "1i0uvjHUp9pXIT1pIPvxcIFNa5Y2fHBEWPKH6OGrNzDA",
+        gid: "0"
+    }
+];
+
+const COL_FECHA = 1;  // columna B (índice 1)
+const COL_ESTADO = 11; // columna L (índice 11)
+const ESTADO_OK = "finalizado";
+const FILA_INICIO = 1; // saltea encabezado
+
+const estado = document.getElementById("estado");
+function setEstado(texto, clase){
+    estado.textContent = texto;
+    estado.className = "estado " + clase;
+}
+
+// ============================================================
+// PARSEO CSV
+// ============================================================
+function parseCSV(texto){
+    const filas = [];
+    let fila = [], celda = "", dentroComillas = false;
+    for(let i=0; i<texto.length; i++){
+        const c = texto[i];
+        if(dentroComillas){
+            if(c === '"' && texto[i+1] === '"'){ celda += '"'; i++; }
+            else if(c === '"'){ dentroComillas = false; }
+            else { celda += c; }
+        } else {
+            if(c === '"'){ dentroComillas = true; }
+            else if(c === ','){ fila.push(celda); celda = ""; }
+            else if(c === '\n'){ fila.push(celda); filas.push(fila); fila = []; celda = ""; }
+            else if(c === '\r'){ /* ignorar */ }
+            else { celda += c; }
+        }
+    }
+    if(celda !== "" || fila.length){ fila.push(celda); filas.push(fila); }
+    return filas;
+}
+
+// ============================================================
+// PARSEO DE FECHA
+// Soporta: DD/MM/YYYY, D/M/YYYY, YYYY-MM-DD, DD-MM-YYYY
+// Devuelve "YYYY-MM-DD" o null
+// ============================================================
+function parsearFecha(txt){
+    if(!txt) return null;
+    txt = txt.trim();
+    let m;
+    // YYYY-MM-DD
+    m = txt.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if(m) return `${m[1]}-${m[2].padStart(2,"0")}-${m[3].padStart(2,"0")}`;
+    // DD/MM/YYYY  o  DD-MM-YYYY
+    m = txt.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+    if(m){
+        let anio = m[3].length === 2 ? "20"+m[3] : m[3];
+        return `${anio}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}`;
+    }
+    return null;
+}
+
+// ============================================================
+// FETCH Y CONTEO
+// ============================================================
+async function obtenerPedidos(zona){
+    const url = `https://docs.google.com/spreadsheets/d/${zona.sheetId}/export?format=csv&gid=${zona.gid}`;
+    const resp = await fetch(url);
+    if(!resp.ok) throw new Error(`No se pudo leer ${zona.nombre} (¿está pública?)`);
+    const texto = await resp.text();
+    const filas = parseCSV(texto);
+    const pedidos = []; // { fecha: "YYYY-MM-DD" }
+    for(let i=FILA_INICIO; i<filas.length; i++){
+        const f = filas[i];
+        if(!f) continue;
+        const fechaTxt = f[COL_FECHA];
+        const estadoTxt = (f[COL_ESTADO] || "").trim().toLowerCase();
+        const fecha = parsearFecha(fechaTxt);
+        if(fecha && estadoTxt === ESTADO_OK){
+            pedidos.push({ fecha });
+        }
+    }
+    return pedidos;
+}
+
+// ============================================================
+// FILTRO Y AGRUPACIÓN
+// ============================================================
+function obtenerRango(){
+    const hoy = new Date();
+    const periodo = document.getElementById("periodo").value;
+    let desde, hasta;
+
+    if(periodo === "semana"){
+        const d = hoy.getDay() || 7; // domingo=0 → 7
+        desde = new Date(hoy); desde.setDate(hoy.getDate() - d + 1);
+        hasta = new Date(desde); hasta.setDate(desde.getDate()+6);
+    } else if(periodo === "mes"){
+        desde = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+        hasta = new Date(hoy.getFullYear(), hoy.getMonth()+1, 0);
+    } else if(periodo === "mes_anterior"){
+        desde = new Date(hoy.getFullYear(), hoy.getMonth()-1, 1);
+        hasta = new Date(hoy.getFullYear(), hoy.getMonth(), 0);
+    } else {
+        desde = new Date(document.getElementById("desde").value);
+        hasta = new Date(document.getElementById("hasta").value);
+    }
+    return {
+        desde: desde.toISOString().slice(0,10),
+        hasta: hasta.toISOString().slice(0,10)
+    };
+}
+
+function aISO(d){ return d.toISOString().slice(0,10); }
+
+function generarEtiquetas(desde, hasta, agrupar){
+    const etiquetas = [];
+    let d = new Date(desde);
+    const fin = new Date(hasta);
+    if(agrupar === "dia"){
+        while(d <= fin){
+            etiquetas.push(aISO(d));
+            d.setDate(d.getDate()+1);
+        }
+    } else { // semana
+        const dia = d.getDay() || 7;
+        d.setDate(d.getDate() - dia + 1);
+        while(d <= fin){
+            etiquetas.push(aISO(d));
+            d.setDate(d.getDate()+7);
+        }
+    }
+    return etiquetas;
+}
+
+function claveAgrupada(fechaISO, agrupar){
+    if(agrupar === "dia") return fechaISO;
+    // semana: lunes de esa semana
+    const d = new Date(fechaISO);
+    const dia = d.getDay() || 7;
+    d.setDate(d.getDate() - dia + 1);
+    return aISO(d);
+}
+
+// ============================================================
+// RENDER
+// ============================================================
+let chartComp = null;
+let cacheDatos = null; // { Güemes: [pedidos], Constitución: [pedidos] }
+let ultimoResumen = null;
+
+async function generar(){
+    try {
+        if(!cacheDatos){
+            setEstado("Descargando planillas...", "cargando");
+            const resultados = await Promise.all(ZONAS.map(z => obtenerPedidos(z)));
+            cacheDatos = {};
+            ZONAS.forEach((z,i) => cacheDatos[z.nombre] = resultados[i]);
+        }
+        setEstado("Procesando...", "cargando");
+
+        const { desde, hasta } = obtenerRango();
+        const agrupar = document.getElementById("agrupar").value;
+        const etiquetas = generarEtiquetas(desde, hasta, agrupar);
+
+        // Filtrar y agrupar por zona
+        const datasets = ZONAS.map(z => {
+            const filtrados = cacheDatos[z.nombre].filter(p => p.fecha >= desde && p.fecha <= hasta);
+            const conteo = {};
+            etiquetas.forEach(e => conteo[e] = 0);
+            filtrados.forEach(p => {
+                const k = claveAgrupada(p.fecha, agrupar);
+                if(conteo[k] !== undefined) conteo[k]++;
+            });
+            return {
+                zona: z.nombre,
+                color: z.color,
+                total: filtrados.length,
+                porEtiqueta: etiquetas.map(e => conteo[e])
+            };
+        });
+
+        ultimoResumen = { etiquetas, datasets, desde, hasta };
+
+        // Tarjetas
+        const totalGlobal = datasets.reduce((s,d)=>s+d.total,0);
+        document.getElementById("tarjetas").innerHTML = datasets.map(d => {
+            const pct = totalGlobal > 0 ? (d.total/totalGlobal*100).toFixed(1) : 0;
+            return `
+                <div class="card">
+                    <h3>${d.zona}</h3>
+                    <div class="num">${d.total}</div>
+                    <div class="sub">pedidos finalizados</div>
+                    <div class="sub">${pct}% del total comparado</div>
+                </div>
+            `;
+        }).join("");
+
+        // Tabla resumen
+        const diasRango = Math.max(1, (new Date(hasta) - new Date(desde))/(1000*60*60*24) + 1);
+        document.querySelector("#tablaResumen tbody").innerHTML = datasets.map(d => {
+            const prom = (d.total / diasRango).toFixed(1);
+            let mejorIdx = 0;
+            d.porEtiqueta.forEach((v,i) => { if(v > d.porEtiqueta[mejorIdx]) mejorIdx = i; });
+            const mejor = d.porEtiqueta[mejorIdx] > 0
+                ? `${etiquetas[mejorIdx]} (${d.porEtiqueta[mejorIdx]})`
+                : "—";
+            return `
+                <tr>
+                    <td><b>${d.zona}</b></td>
+                    <td>${d.total}</td>
+                    <td>${prom}</td>
+                    <td>${mejor}</td>
+                </tr>
+            `;
+        }).join("");
+
+        // Gráfico
+        if(chartComp) chartComp.destroy();
+        chartComp = new Chart(document.getElementById("graficoComp"), {
+            type: "bar",
+            data: {
+                labels: etiquetas,
+                datasets: datasets.map(d => ({
+                    label: d.zona,
+                    data: d.porEtiqueta,
+                    backgroundColor: d.color
+                }))
+            },
+            options: {
+                responsive: true,
+                scales: { y: { beginAtZero:true, ticks:{ precision:0 } } }
+            }
+        });
+
+        setEstado(`Datos de ${desde} a ${hasta} (${totalGlobal} pedidos en total)`, "ok");
+    } catch(e){
+        console.error(e);
+        setEstado("Error: " + e.message, "error");
+    }
+}
+
+function onPeriodoChange(){
+    const p = document.getElementById("periodo").value;
+    document.getElementById("rangoCustom").style.display = (p === "rango") ? "inline" : "none";
+}
+
+function exportarCSV(){
+    if(!ultimoResumen){ alert("Primero generá el informe"); return; }
+    const filas = [["Etiqueta", ...ultimoResumen.datasets.map(d => d.zona)]];
+    ultimoResumen.etiquetas.forEach((e,i) => {
+        filas.push([e, ...ultimoResumen.datasets.map(d => d.porEtiqueta[i])]);
+    });
+    const csv = filas.map(f => f.join(",")).join("\n");
+    const blob = new Blob([csv], { type:"text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "pedidos-por-zona.csv";
+    a.click();
+}
+
+// Fechas por defecto del rango custom
+const hoy = new Date();
+document.getElementById("hasta").value = aISO(hoy);
+document.getElementById("desde").value = aISO(new Date(hoy.getFullYear(), hoy.getMonth(), 1));
+
+generar();
+</script>
+
+</body>
+</html>
