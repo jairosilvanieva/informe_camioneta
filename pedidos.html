@@ -223,39 +223,23 @@ async function obtenerPedidos(zona){
     if(!resp.ok) throw new Error(`No se pudo leer ${zona.nombre} (¿está pública?)`);
     const texto = await resp.text();
     const filas = parseCSV(texto);
+
     const pedidos = [];
+    const ANIO_LIMITE = 2026;
 
-    const ANIO_LIMITE = 2026; // solo desde este año en adelante
-    let anioInferido = new Date().getFullYear(); // arrancamos en el año actual
-    let mesPrevio = null;
-
-    // Recorremos de abajo hacia arriba: las filas más nuevas están al final
-    for(let i=filas.length-1; i>=FILA_INICIO; i--){
+    for(let i=FILA_INICIO; i<filas.length; i++){
         const f = filas[i];
         if(!f) continue;
         const fechaTxt = (f[COL_FECHA] || "").trim();
         if(!fechaTxt) continue;
         const p = parsearFechaParcial(fechaTxt);
-        if(!p) continue;
+        if(!p || !p.anio) continue; // requiere año explícito (DD/MM/YYYY)
         if(p.mes < 1 || p.mes > 12 || p.dia < 1 || p.dia > 31) continue;
-
-        let anio;
-        if(p.anio){
-            anio = p.anio;
-        } else {
-            // Yendo para atrás: si el mes "salta hacia adelante" (ej. de 01 a 12), bajamos un año
-            if(mesPrevio !== null && p.mes > mesPrevio){
-                anioInferido--;
-            }
-            anio = anioInferido;
-            mesPrevio = p.mes;
-        }
-
-        if(anio < ANIO_LIMITE) break; // no nos interesa años anteriores
+        if(p.anio < ANIO_LIMITE) continue;
 
         const estadoTxt = (f[COL_ESTADO] || "").trim().toLowerCase();
         if(estadoTxt === ESTADO_OK){
-            const fecha = `${anio}-${String(p.mes).padStart(2,"0")}-${String(p.dia).padStart(2,"0")}`;
+            const fecha = `${p.anio}-${String(p.mes).padStart(2,"0")}-${String(p.dia).padStart(2,"0")}`;
             pedidos.push({ fecha });
         }
     }
@@ -427,25 +411,31 @@ function onPeriodoChange(){
 async function mostrarDebug(){
     const box = document.getElementById("debugBox");
     box.style.display = "block";
-    box.textContent = "Descargando...";
+    box.textContent = "Procesando...";
     box.scrollIntoView({ behavior:"smooth", block:"start" });
     let out = "";
     for(const z of ZONAS){
-        const url = `https://docs.google.com/spreadsheets/d/${z.sheetId}/export?format=csv&gid=${z.gid}`;
         try {
-            const resp = await fetch(url);
-            const txt = await resp.text();
-            const filas = parseCSV(txt);
+            const pedidos = await obtenerPedidos(z);
             out += `===== ${z.nombre} =====\n`;
-            out += `Total filas leídas: ${filas.length}\n\n`;
-            for(let i=0; i<Math.min(6, filas.length); i++){
-                out += `Fila ${i}:\n`;
-                (filas[i] || []).forEach((c, idx) => {
-                    const letra = String.fromCharCode(65 + idx);
-                    out += `  ${letra} (col ${idx}): "${c}"\n`;
-                });
-                out += "\n";
-            }
+            out += `Total pedidos "Finalizado" desde 2026: ${pedidos.length}\n\n`;
+            // Distribución por año-mes
+            const porMes = {};
+            pedidos.forEach(p => {
+                const ym = p.fecha.slice(0,7);
+                porMes[ym] = (porMes[ym] || 0) + 1;
+            });
+            const keys = Object.keys(porMes).sort();
+            out += "Pedidos por mes:\n";
+            keys.forEach(k => { out += `  ${k}: ${porMes[k]}\n`; });
+            out += "\nPrimeros 5 pedidos (cronológicamente):\n";
+            pedidos.slice().sort((a,b)=>a.fecha.localeCompare(b.fecha)).slice(0,5).forEach(p => {
+                out += `  ${p.fecha}\n`;
+            });
+            out += "\nÚltimos 5 pedidos:\n";
+            pedidos.slice().sort((a,b)=>a.fecha.localeCompare(b.fecha)).slice(-5).forEach(p => {
+                out += `  ${p.fecha}\n`;
+            });
             out += "\n";
         } catch(e){
             out += `Error en ${z.nombre}: ${e.message}\n\n`;
