@@ -75,6 +75,42 @@
     }
     input.guardado{ background:#e8f5e9; }
     .vacio{ background:#ececec; }
+
+    /* ====== Vista mobile: lista vertical de días ====== */
+    @media (max-width: 800px){
+        body{ margin:8px; }
+        h1{ font-size:18px; }
+        .nav-mes h2{ min-width:auto; font-size:14px; padding:8px; }
+        .nav-mes button{ padding:6px 10px; font-size:13px; }
+
+        /* Ocultar tabla, mostrar lista */
+        #tablaMes{ display:none; }
+        #listaMes{ display:block; }
+
+        .dia-card{
+            background:white; border-radius:8px;
+            padding:10px; margin-bottom:10px;
+            box-shadow:0 1px 2px rgba(0,0,0,0.1);
+        }
+        .dia-card .dia-titulo{
+            font-weight:bold; font-size:15px;
+            margin-bottom:8px; color:#333;
+            border-bottom:1px solid #eee; padding-bottom:5px;
+        }
+        .dia-card .local{
+            display:grid; grid-template-columns:auto 1fr auto 1fr;
+            gap:6px; align-items:center;
+            padding:6px; margin-bottom:5px;
+        }
+        .dia-card .local h4{ font-size:12px; }
+        .dia-card label{ font-size:12px; }
+        .dia-card input{ font-size:14px; padding:6px; }
+    }
+
+    /* En desktop, ocultar la lista */
+    @media (min-width: 801px){
+        #listaMes{ display:none; }
+    }
 </style>
 </head>
 
@@ -101,6 +137,8 @@
         <th>Jueves</th><th>Viernes</th><th>Sábado</th><th>Domingo</th>
     </tr>
 </table>
+
+<div id="listaMes"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="supabase.js"></script>
@@ -196,7 +234,35 @@ function renderMes(){
     }
     tabla.appendChild(tr);
 
-    // Conectar inputs al guardado
+    // ====== Render lista vertical (mobile) ======
+    const lista = document.getElementById("listaMes");
+    const NOMBRES_DIA = ["Domingo","Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"];
+    let html = "";
+    for(let d=1; d<=dias; d++){
+        const fecha = fechaISO(anioActual, mesActual, d);
+        const nombreDia = NOMBRES_DIA[new Date(anioActual, mesActual-1, d).getDay()];
+        html += `
+            <div class="dia-card">
+                <div class="dia-titulo">${nombreDia} ${d}</div>
+                ${LOCALES.map(l => `
+                    <div class="local">
+                        <h4>${l}</h4>
+                        <label>Cam.</label>
+                        <input type="number" min="0"
+                            data-fecha="${fecha}" data-local="${l}" data-campo="camioneta"
+                            data-vista="lista" placeholder="0">
+                        <label>Tot.</label>
+                        <input type="number" min="0"
+                            data-fecha="${fecha}" data-local="${l}" data-campo="total"
+                            data-vista="lista" placeholder="0">
+                    </div>
+                `).join("")}
+            </div>
+        `;
+    }
+    lista.innerHTML = html;
+
+    // Conectar inputs al guardado (tabla + lista)
     document.querySelectorAll("input[data-fecha]").forEach(inp => {
         inp.addEventListener("change", () => guardarCelda(inp));
     });
@@ -245,10 +311,12 @@ async function cargarDatosDelMes(){
 
         data.forEach(r => {
             const sel = `input[data-fecha="${r.fecha}"][data-local="${r.local}"]`;
-            const inpCam = document.querySelector(sel + `[data-campo="camioneta"]`);
-            const inpTot = document.querySelector(sel + `[data-campo="total"]`);
-            if(inpCam){ inpCam.value = r.camioneta ?? ""; inpCam.classList.add("guardado"); }
-            if(inpTot){ inpTot.value = r.total ?? "";   inpTot.classList.add("guardado"); }
+            document.querySelectorAll(sel + `[data-campo="camioneta"]`).forEach(i => {
+                i.value = r.camioneta ?? ""; i.classList.add("guardado");
+            });
+            document.querySelectorAll(sel + `[data-campo="total"]`).forEach(i => {
+                i.value = r.total ?? ""; i.classList.add("guardado");
+            });
         });
         setEstado("Conectado. Los cambios se guardan automáticamente.", "ok");
     }catch(e){
@@ -261,11 +329,15 @@ async function guardarCelda(input){
     const fecha = input.dataset.fecha;
     const local = input.dataset.local;
 
-    const inpCam = document.querySelector(`input[data-fecha="${fecha}"][data-local="${local}"][data-campo="camioneta"]`);
-    const inpTot = document.querySelector(`input[data-fecha="${fecha}"][data-local="${local}"][data-campo="total"]`);
+    const inpsCam = document.querySelectorAll(`input[data-fecha="${fecha}"][data-local="${local}"][data-campo="camioneta"]`);
+    const inpsTot = document.querySelectorAll(`input[data-fecha="${fecha}"][data-local="${local}"][data-campo="total"]`);
 
-    const camioneta = inpCam.value === "" ? null : Number(inpCam.value);
-    const total     = inpTot.value === "" ? null : Number(inpTot.value);
+    const camioneta = inpsCam[0].value === "" ? null : Number(inpsCam[0].value);
+    const total     = inpsTot[0].value === "" ? null : Number(inpsTot[0].value);
+
+    // Sincronizar el otro input (lista <-> tabla)
+    inpsCam.forEach(i => i.value = camioneta ?? "");
+    inpsTot.forEach(i => i.value = total ?? "");
 
     setEstado("Guardando...", "cargando");
 
@@ -276,8 +348,8 @@ async function guardarCelda(input){
     if(error){
         setEstado("Error al guardar: " + error.message, "error");
     }else{
-        inpCam.classList.add("guardado");
-        inpTot.classList.add("guardado");
+        inpsCam.forEach(i => i.classList.add("guardado"));
+        inpsTot.forEach(i => i.classList.add("guardado"));
         setEstado("Guardado ✓", "ok");
     }
 }
