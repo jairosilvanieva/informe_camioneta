@@ -192,23 +192,25 @@ function parseCSV(texto){
 }
 
 // ============================================================
-// PARSEO DE FECHA
-// Soporta: DD/MM/YYYY, D/M/YYYY, YYYY-MM-DD, DD-MM-YYYY
-// Devuelve "YYYY-MM-DD" o null
+// PARSEO DE FECHA — soporta DD/MM, DD/MM/YY(YY), YYYY-MM-DD
+// Devuelve { dia, mes, anio|null }
 // ============================================================
-function parsearFecha(txt){
+function parsearFechaParcial(txt){
     if(!txt) return null;
     txt = txt.trim();
     let m;
     // YYYY-MM-DD
     m = txt.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-    if(m) return `${m[1]}-${m[2].padStart(2,"0")}-${m[3].padStart(2,"0")}`;
-    // DD/MM/YYYY  o  DD-MM-YYYY
-    m = txt.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+    if(m) return { dia: +m[3], mes: +m[2], anio: +m[1] };
+    // DD/MM/YYYY o DD-MM-YYYY
+    m = txt.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
     if(m){
-        let anio = m[3].length === 2 ? "20"+m[3] : m[3];
-        return `${anio}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}`;
+        let anio = m[3].length === 2 ? 2000 + +m[3] : +m[3];
+        return { dia: +m[1], mes: +m[2], anio };
     }
+    // DD/MM (sin año)
+    m = txt.match(/^(\d{1,2})[\/\-](\d{1,2})$/);
+    if(m) return { dia: +m[1], mes: +m[2], anio: null };
     return null;
 }
 
@@ -221,14 +223,39 @@ async function obtenerPedidos(zona){
     if(!resp.ok) throw new Error(`No se pudo leer ${zona.nombre} (¿está pública?)`);
     const texto = await resp.text();
     const filas = parseCSV(texto);
-    const pedidos = []; // { fecha: "YYYY-MM-DD" }
-    for(let i=FILA_INICIO; i<filas.length; i++){
+    const pedidos = [];
+
+    const ANIO_LIMITE = 2026; // solo desde este año en adelante
+    let anioInferido = new Date().getFullYear(); // arrancamos en el año actual
+    let mesPrevio = null;
+
+    // Recorremos de abajo hacia arriba: las filas más nuevas están al final
+    for(let i=filas.length-1; i>=FILA_INICIO; i--){
         const f = filas[i];
         if(!f) continue;
-        const fechaTxt = f[COL_FECHA];
+        const fechaTxt = (f[COL_FECHA] || "").trim();
+        if(!fechaTxt) continue;
+        const p = parsearFechaParcial(fechaTxt);
+        if(!p) continue;
+        if(p.mes < 1 || p.mes > 12 || p.dia < 1 || p.dia > 31) continue;
+
+        let anio;
+        if(p.anio){
+            anio = p.anio;
+        } else {
+            // Yendo para atrás: si el mes "salta hacia adelante" (ej. de 01 a 12), bajamos un año
+            if(mesPrevio !== null && p.mes > mesPrevio){
+                anioInferido--;
+            }
+            anio = anioInferido;
+            mesPrevio = p.mes;
+        }
+
+        if(anio < ANIO_LIMITE) break; // no nos interesa años anteriores
+
         const estadoTxt = (f[COL_ESTADO] || "").trim().toLowerCase();
-        const fecha = parsearFecha(fechaTxt);
-        if(fecha && estadoTxt === ESTADO_OK){
+        if(estadoTxt === ESTADO_OK){
+            const fecha = `${anio}-${String(p.mes).padStart(2,"0")}-${String(p.dia).padStart(2,"0")}`;
             pedidos.push({ fecha });
         }
     }
