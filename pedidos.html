@@ -130,7 +130,10 @@
 
 <div class="exportar">
     <button onclick="exportarCSV()">Descargar CSV</button>
+    <button onclick="mostrarDebug()" style="background:#888; margin-left:10px;">Ver datos crudos (debug)</button>
 </div>
+
+<div id="debugBox" style="display:none; background:white; padding:15px; border-radius:8px; margin-top:20px; font-family:monospace; font-size:11px; white-space:pre-wrap; overflow-x:auto;"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
@@ -392,6 +395,35 @@ async function generar(){
 function onPeriodoChange(){
     const p = document.getElementById("periodo").value;
     document.getElementById("rangoCustom").style.display = (p === "rango") ? "inline" : "none";
+}
+
+async function mostrarDebug(){
+    const box = document.getElementById("debugBox");
+    box.style.display = "block";
+    box.textContent = "Descargando...";
+    let out = "";
+    for(const z of ZONAS){
+        const url = `https://docs.google.com/spreadsheets/d/${z.sheetId}/export?format=csv&gid=${z.gid}`;
+        try {
+            const resp = await fetch(url);
+            const txt = await resp.text();
+            const filas = parseCSV(txt);
+            out += `===== ${z.nombre} =====\n`;
+            out += `Total filas leídas: ${filas.length}\n\n`;
+            for(let i=0; i<Math.min(6, filas.length); i++){
+                out += `Fila ${i}:\n`;
+                (filas[i] || []).forEach((c, idx) => {
+                    const letra = String.fromCharCode(65 + idx);
+                    out += `  ${letra} (col ${idx}): "${c}"\n`;
+                });
+                out += "\n";
+            }
+            out += "\n";
+        } catch(e){
+            out += `Error en ${z.nombre}: ${e.message}\n\n`;
+        }
+    }
+    box.textContent = out;
 }
 
 function exportarCSV(){
